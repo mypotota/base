@@ -10,7 +10,9 @@
 #   ./sync.sh --dry-run   演练模式：只打印将要执行的动作，不修改任何东西
 #
 set -u
-export GIT_TERMINAL_PROMPT=0   # 凭证缺失时快速失败，避免定时任务挂起
+# 在终端手动运行时允许 git 弹出登录提示（首次认证用）；
+# 定时任务中无终端，则快速失败避免挂起
+if [ -t 0 ]; then export GIT_TERMINAL_PROMPT=1; else export GIT_TERMINAL_PROMPT=0; fi
 
 DRY_RUN=0
 case "${1:-}" in

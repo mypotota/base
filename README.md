@@ -65,13 +65,35 @@ base/
 
 ## 认证（HTTPS 推送需一次性配置）
 
-```bash
-# 方式一：Personal Access Token + 凭证助手（推荐）
-git config --global credential.helper store   # macOS 默认 osxkeychain，无需再设
-# 下次手动 push 时输入 GitHub 用户名 + PAT，之后自动记住
+### 方式一：浏览器授权（推荐，无需任何令牌）
 
-# 方式二：改用 SSH
+通过 GitHub CLI 完成一次浏览器 OAuth 授权，之后 git 推送认证全部自动：
+
+```bash
+# 1. 安装 gh：Ubuntu/Debian 用 sudo apt install gh；macOS 用 brew install gh
+
+# 2. 浏览器授权：终端会显示一次性代码，按回车打开 github.com 登录并输入该代码
+gh auth login --hostname github.com --git-protocol https --web
+
+# 3. 让 git 用 gh 完成推送认证（自动写入 gh 的绝对路径，定时任务中也能找到）
+git config --global credential.https://github.com.helper "!$(command -v gh) auth git-credential"
+```
+
+### 方式二：SSH 密钥（备选）
+
+`ssh-keygen` 生成密钥后把公钥添加到 GitHub → Settings → SSH keys，然后：
+
+```bash
 git remote set-url origin git@github.com:mypotota/base.git
+```
+
+### 方式三：Personal Access Token（备选）
+
+GitHub → Settings → Developer settings → 生成勾选 `repo` 权限的令牌，然后：
+
+```bash
+git config --global credential.helper store
+# 手动执行一次 git push，按提示输入用户名 + 令牌，之后自动记住
 ```
 
 建议把提交邮箱换成 GitHub 账号邮箱（否则提交不计入贡献图）：
