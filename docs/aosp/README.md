@@ -41,7 +41,7 @@
 - **目标**：用自己编译的镜像启动模拟器，掌握"重启 framework 不重启模拟器"的快捷技巧。
 - **步骤**：
   1. `source ~/aosp/env_aosp.sh` —— 内部做了：设置 ccache → `source build/envsetup.sh` → `lunch aosp_x86_64-eng`
-  2. `emulator` 启动（首次约 2~5 分钟，耐心等桌面出现）
+  2. `emulator -writable-system -no-snapshot -gpu swiftshader_indirect` 启动（首次约 2~5 分钟）。**`-writable-system` 必加**：默认 system 分区只读，不加它后面 `adb remount` 必失败
   3. 验证：`adb devices` 看到 device；`adb root` 返回 `adbd restarted as root`（eng 版特权）
   4. 快捷键（本章最重要的技巧）：
      - 重启整个 framework（不用重启模拟器，约 30 秒）：`adb shell stop && adb shell start`
@@ -65,12 +65,13 @@
 
 - **目标**：打通"改源码 → 单模块增量编译 → 部署到模拟器"完整闭环。
 - **步骤**：
-  1. 编辑 `~/aosp/frameworks/base/packages/Settings/res/values-zh-rCN/strings.xml`，把 `display_settings_title` 的"显示"改成"显示·我改的"
-  2. 编译：`m Settings`（单模块增量，几分钟）
-  3. 部署：`adb root && adb remount && adb sync`（Settings 是 priv-app，用 sync 而不是 install）
-  4. 重启 Settings 进程后打开设置看效果
+  1. 先查主页布局 `~/aosp/packages/apps/Settings/res/xml/top_level_settings.xml`，确认"显示"条目引用的是 `@string/display_settings`（注意：Settings 在 `packages/apps/`，不在 frameworks 里！）
+  2. 编辑 `~/aosp/packages/apps/Settings/res/values-zh-rCN/strings.xml` 和 `res/values/strings.xml`，把 `display_settings` 改成"显示 · 我改的"
+  3. 编译：`m Settings`（单模块增量，几分钟）
+  4. 部署：`adb remount && adb sync system`（Settings 是 priv-app，用 sync 而不是 install；需模拟器以 `-writable-system` 启动）
+  5. `am force-stop com.android.settings` 后重开设置看效果
 - **验收**：模拟器设置界面里亲眼看到自己改的文字。
-- **常见坑**：`adb remount` 失败说明当前不是 eng/userdebug；改了没生效先 force-stop 对应进程。
+- **常见坑**：① 改错 key（`display_settings_title` 是二级页标题，主页条目用的是 `display_settings`——先查布局引用再动手）；② remount 失败=模拟器没带 `-writable-system` 启动；③ `adb sync` 报缺 `ANDROID_PRODUCT_OUT` = 忘了 lunch。
 
 ### 第 3 章 · 日志实验：看见 AMS 跳动（约 1~2 小时）
 
@@ -126,7 +127,7 @@
 |---|---|---|---|
 | ch00 跑起来：模拟器与开发闭环 | ✅ | 2026-11-15 | [ch00-跑起来.md](ch00-跑起来.md) |
 | ch01 观察系统：进程地图 | ✅ | 2026-11-15 | [ch01-进程地图.md](ch01-进程地图.md) |
-| ch02 第一个改动：Settings | ⬜ | | |
+| ch02 第一个改动：Settings | ✅ | 2026-11-15 | [ch02-第一个改动.md](ch02-第一个改动.md) |
 | ch03 日志实验：AMS 跳动 | ⬜ | | |
 | ch04 断点调试：调用栈 | ⬜ | | |
 | ch05 Binder 初体验 | ⬜ | | |
@@ -136,7 +137,7 @@
 
 ```bash
 source ~/aosp/env_aosp.sh              # 每个新终端第一句
-emulator                               # 用 out/ 里的镜像启动模拟器
+emulator -writable-system -no-snapshot -gpu swiftshader_indirect  # 用 out/ 镜像启动（-writable-system 必加，否则不能改 system 分区）
 adb root && adb remount && adb sync    # 部署 system 分区改动
 adb shell stop && adb shell start      # 重启 framework（约 30 秒）
 m Settings                             # 单模块增量编译
