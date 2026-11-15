@@ -73,17 +73,17 @@
 - **验收**：模拟器设置界面里亲眼看到自己改的文字。
 - **常见坑**：① 改错 key（`display_settings_title` 是二级页标题，主页条目用的是 `display_settings`——先查布局引用再动手）；② remount 失败=模拟器没带 `-writable-system` 启动；③ `adb sync` 报缺 `ANDROID_PRODUCT_OUT` = 忘了 lunch。
 
-### 第 3 章 · 日志实验：看见 AMS 跳动（约 1~2 小时）
+### 第 3 章 · 日志实验：看见 ATMS 跳动（约 1~2 小时）
 
-- **目标**：在 ActivityManagerService 里加一行日志，亲眼看到"点一下图标"背后的调用。
+- **目标**：在 ActivityTaskManagerService 里加一行 Slog 探针，亲眼看到"点一下"背后的跨进程调用。
 - **步骤**：
-  1. 编辑 `~/aosp/frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java`，在 `startActivity` 方法开头加：`Slog.d("MYTAG", "startActivity: " + intent);`
-  2. 编译：`m services`（AMS 属于 services 模块）
-  3. 生效：`adb root && adb remount && adb sync && adb shell stop && adb shell start`
-  4. 观察：`adb logcat -s MYTAG`，然后点击桌面图标
-- **验收**：logcat 里出现自己的 tag；顺带观察一次点击触发几次调用、参数长什么样。
-- **学到**：`Slog`（系统日志）和 `Log`（app 日志）的区别；framework 代码也是普通 Java 代码，改起来毫无魔法。
-- **常见坑**：忘记在新终端 source 环境脚本；`stop && start` 后 adb 会短暂断连，等几秒。
+  1. 编辑 `~/aosp/frameworks/base/services/core/java/com/android/server/wm/ActivityTaskManagerService.java`（注意是 **wm 包的 ATMS**，Android 10 已把启动链路从 AMS 分家到这里），在 `startActivity` 开头加：`Slog.d("MYTAG", "ATMS.startActivity: from uid=" + Binder.getCallingUid() + " pid=" + Binder.getCallingPid() + " intent=" + intent);`
+  2. 编译：`m services`（实测约 2 分钟）
+  3. 生效：`adb remount && adb sync system && adb shell stop && adb shell start`
+  4. 观察：`adb logcat -c && adb logcat -s MYTAG`，然后**用 `input tap` 真实点击**界面条目
+- **验收**：logcat 里出现自己的 tag，且日志里 `getCallingPid` ≠ system_server 的 pid（跨进程铁证）。
+- **学到**：Android 10 AMS/ATMS 分家；`am start` 与真实点击走不同入口；Slog vs Log。
+- **常见坑**：① `am start` 触发不了这个探针（它直调 startActivityAsUser，见 ActivityManagerShellCommand.java:518），必须真实点击；② 忘 source 环境脚本导致 sync 报错。
 
 ### 第 4 章 · 断点调试：让调用栈说话（约 2 小时）
 
@@ -128,7 +128,7 @@
 | ch00 跑起来：模拟器与开发闭环 | ✅ | 2026-11-15 | [ch00-跑起来.md](ch00-跑起来.md) |
 | ch01 观察系统：进程地图 | ✅ | 2026-11-15 | [ch01-进程地图.md](ch01-进程地图.md) |
 | ch02 第一个改动：Settings | ✅ | 2026-11-15 | [ch02-第一个改动.md](ch02-第一个改动.md) |
-| ch03 日志实验：AMS 跳动 | ⬜ | | |
+| ch03 日志实验：ATMS 跳动 | ✅ | 2026-11-15 | [ch03-日志实验.md](ch03-日志实验.md) |
 | ch04 断点调试：调用栈 | ⬜ | | |
 | ch05 Binder 初体验 | ⬜ | | |
 | ch06 startActivity 链路走读 | ⬜ | | |
