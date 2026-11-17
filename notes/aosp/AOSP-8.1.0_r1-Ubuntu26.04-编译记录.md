@@ -57,23 +57,32 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
 
 ## 四、编译线程数评估（防 OOM）
 
-**结论：`-j10`，如后台大应用关闭可提到 `-j12`。**
+**结论：`-j10`（实测正确）。**
 
 依据：
 
-- AOSP 8.1 单个编译任务（clang 5.0 / gcc 4.9）峰值内存约 1~1.5GB，soong+kati 常驻约 2~3GB
-- 22G 内存减去常驻桌面应用（Chrome、微信、网盘、AndroidStudio 等约 7G）≈ 15G 可用
-- `-j10` 峰值 ≈ 10×1.2 + 3 ≈ **15G**，与可用内存持平，23G Swap 作为兜底，OOM killer 不会触发
-- `-j16` 需要关闭 Chrome/网盘等后台应用才安全；8.1 构建瓶颈也常在磁盘 IO，核数打满收益有限
-- 建议：构建期间关闭百度网盘等后台程序；不要手动跑 jack server（见下）
+- AOSP 8.1 单个编译任务（clang 3.8 / gcc 4.9）峰值内存约 1~1.5GB，soong+kati 常驻约 2~3GB
+- 22G 内存减去常驻桌面应用（Chrome、微信、网盘等约 7G）≈ 15G 可用
+- `-j10` 峰值 ≈ 10×1.2 + 3 ≈ **15G**，与可用内存持平，23G Swap 兜底，OOM killer 不触发
+- **实测**：编译全程 30 个并发任务时 avail 内存最低约 12G、swap 使用稳定在 4~5.6G（含系统旧缓存），无任何 OOM
+- 若关闭 Chrome/网盘等后台，可提 `-j12`；8.1 构建瓶颈在磁盘 IO，打满 16 线程收益有限
 
-## 五、Ubuntu 26.04 (glibc 2.43) 适配要点
+## 五、Ubuntu 26.04 (glibc 2.43) 适配要点（最终生效清单）
 
-1. python2：26.04 已无 python2 包。方案：将源码树内 `prebuilts/python/linux-x86/2.7.5/bin` 加入 PATH（构建 shell 内局部生效）
-2. JDK8：构建系统自动使用 `prebuilts/jdk/jdk8`
-3. Jack 编译器：8.1 默认用 Jack，在新内核/新 JVM 环境易出问题且吃内存 → 视编译情况用 `ANDROID_COMPILE_WITH_JACK=false` 走 javac 老路径
-4. 旧 prebuilt 二进制对 `libncurses5/libtinfo5` 的依赖：同步后用 `ldd` 审计，缺则本地源码编译 ncurses5 到 ~/.local 免 sudo 解决
-5. 官方依赖包（bison/flex/gperf/multilib 等）此前编 AOSP10 时已装齐
+构建前必须设置（已固化在 `~/aosp/env_aosp8.sh` 与 `~/aosp-scripts/build_aosp8.sh`）：
+
+```bash
+export PATH="$HOME/aosp-scripts/shims:$PATH"   # python/python2/python2.7 → ~/.local/py27 (自建2.7.18)
+export LC_ALL=C                                # 旧 prebuilts (flex 2.5.39) locale 断言
+export ANDROID_DATA=~/aosp-scripts/and-data    # dex2oatd 需要
+export WITH_DEXPREOPT=false                    # 8.1 默认 dexpreopt，新内核 mmap 失败
+export ANDROID_COMPILE_WITH_JACK=false         # jack server 在新系统初始化失败
+# 编译命令: setarch -R make -j10 WITH_DEXPREOPT=false
+```
+
+- JDK8：构建系统自动用 `prebuilts/jdk/jdk8`（1.8.0_152-android），无需系统 JDK
+- 官方依赖包（bison/flex/gperf/multilib 等）此前编 AOSP10 时已装齐，本次零安装
+- 自建 python2.7.18 位于 `~/.local/py27`（zlib 来自树内 `external/zlib/src`，装在 `~/.local/pyzlib`，rpath 链接）
 
 ## 六、编译错误与修复（持续追加）
 
@@ -132,11 +141,41 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
    - 根因：8.1 的 boot.art 内嵌固定基址约 0x703e5000（老地址布局），新内核/glibc 的 mmap 布局下该区域被占用，MAP_FIXED 失败；dex2oat 不接受 imageless 回退。AOSP 8.x 在新宿主上的著名问题
    - 修复（尝试顺序）：①`setarch -R make -j10`（仅构建进程关 ASLR，恢复老式地址布局）；②若无效则 `export NO_DEXPREOPT=true` 完全跳过 host 端 dex 预优化（eng 版本可接受，首次开机稍慢）
 
-## 七、模拟器运行
+## 七、模拟器运行（已验证 ✅）
 
-（编译完成后记录）
+```bash
+source ~/aosp/env_aosp8.sh
+PATH=$PWD/prebuilts/android-emulator/linux_x86_64:$PATH \
+  emulator -no-snapshot -gpu swiftshader_indirect -no-boot-anim -memory 2048
+```
 
-## 八、复用说明
+验证结果（2026-11-17 14:41）：
 
-- 一键构建脚本：`~/aosp/env_aosp8.sh`（编译完成后生成）
-- 知识库由 `scripts/sync.sh` 自动提交推送，无需手动 git 操作
+- `adb devices` → `emulator-5554 device`
+- `sys.boot_completed=1`，bootanim stopped，Launcher 获得焦点，80 个系统包
+- `ro.build.version.release = 8.1.0`
+- fingerprint：`Android/aosp_x86_64/generic_x86_64:8.1.0/OPM1.171019.011/zhao11171237:eng/test-keys`
+- 软渲染 swiftshader_indirect（无 GPU 直通需求），首次开机约 1 分钟（因跳过 dexpreopt，应用在首次启动时现场 dexopt，个别应用首启稍慢）
+
+产物：`out/target/product/generic_x86_64/{system-qemu,vendor-qemu,userdata,ramdisk,cache}.img`
+
+## 八、复用与脚本清单
+
+| 路径 | 用途 |
+|---|---|
+| `~/aosp/env_aosp8.sh` | 一键 source：shim/locale/ANDROID_DATA/WITH_DEXPREOPT/Jack 全套环境 + lunch |
+| `~/aosp-scripts/build_aosp8.sh` | 后台全量编译脚本（含全部修复，可直接重跑） |
+| `~/aosp-scripts/boot_emu8.sh` | 启动模拟器 + adb 轮询验证开机 |
+| `~/aosp-scripts/shims/{python,python2,python2.7}` | py2 shim → `~/.local/py27/bin/python2.7` |
+| `~/aosp-scripts/sync_aosp8.sh` | repo 同步脚本（低速自愈 + 20 轮重试） |
+| `~/aosp-scripts/fetch_tools_tag.sh` | prebuilts/tools 单 tag 精准抓取（tag 爆炸时用） |
+| `~/aosp-scripts/emulator.log` / `mem_monitor.log` | 模拟器日志 / 编译期内存监控 |
+
+知识库由 `scripts/sync.sh` 自动提交推送，无需手动 git 操作。
+
+## 九、总耗时与结果
+
+- 清理 AOSP10 + 工具链：~10 分钟（释放 220G）
+- 源码同步：02:19 → 12:17（约 10 小时，含镜像限流、排队、tag 爆炸绕坑；正常深夜时段约 2~3 小时）
+- 编译：12:20 → 14:35（有效编译约 100 分钟，其中 5 次错误返工约 40 分钟）
+- 模拟器开机验证：14:40 → 14:41 ✅
