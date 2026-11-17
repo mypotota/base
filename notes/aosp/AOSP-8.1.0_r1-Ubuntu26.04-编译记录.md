@@ -97,6 +97,15 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
 4. **TUNA 镜像早高峰节流（2026-11-17 实测）**
    - 02:00~08:00：单连接 0.5~6MB/s；09:00 后大仓库排队 Position 74+，单连接几十 KB/s
    - 应对：大文件抓取尽量安排在中国时区深夜；repo sync 用 `-j8` 平衡排队与吞吐
+5. **错误①：Jack 服务器通信失败（2026-11-17 12:21，编译 1 分钟即失败）**
+   - 报错：`Communication error with Jack server (2)`、`curl: The file '/home/zhao/.jack-server/server.pem' provided to --cacert does not exist`
+   - 根因：8.1 默认启用 Jack 编译器（`ANDROID_COMPILE_WITH_JACK ?= true`；只读 config.mk 后半段分支逻辑会误判为默认关闭），Jack server 首次启动需生成证书，在新系统/新 curl 上初始化失败；Jack 已被 Google 弃用
+   - 修复：构建前 `export ANDROID_COMPILE_WITH_JACK=false`，走 javac + proguard 传统路径（aosp_x86_64-eng 产物无差别，社区标准做法）
+6. **错误②：python2 脚本撞上系统 python3.14（2026-11-17 12:23）**
+   - 报错：`build/tools/merge-event-log-tags.py` 的 `print str(err)` → `SyntaxError: Missing parentheses in call to 'print'`
+   - 根因：Ubuntu 26.04 无 python2，`python` 符号链接指向 python 3.14；8.1 的构建脚本（merge-event-log-tags.py 等）全是 py2 语法
+   - 修复：用源码树内置的 `prebuilts/python/linux-x86/2.7.5` 做 shim——写 `~/aosp-scripts/shims/{python,python2,python2.7}` 三个小脚本（内设 `PYTHONHOME` 后 exec 内置 python），并 `export PATH=~/aosp-scripts/shims:$PATH`
+   - 细节：内置 python2.7.5 跑脚本必须设 `PYTHONHOME` 指向其 prefix，否则 import 全挂；实测其不含 zlib/ssl 模块，但排查后确认 8.1 构建脚本均不 import zlib/ssl，可放心使用（若后续有需要再源码编 python2.7.18）
 
 ## 七、模拟器运行
 
