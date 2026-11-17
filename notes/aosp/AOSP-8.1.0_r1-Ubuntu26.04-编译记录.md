@@ -86,6 +86,17 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
    - 现象：后台任务里执行 `pkill -f 'repo sync'` 清理旧进程，整个任务瞬间失败且日志为空
    - 原因：`pkill -f` 匹配的是完整命令行，包裹命令的 `bash -c "… pkill -f 'repo sync' …"` 自身的命令行里就含有该字符串，把自己也杀了
    - 修复：用字符类破坏自匹配，例如 `pkill -f 'repo sy[n]c'`
+3. **repo 对 tag 版本 manifest 的 `--tags` 全量抓取灾难（2026-11-17）**
+   - 现象：`android-8.1.0_r1` 是 tag 版 manifest，repo 对每个项目执行 `fetch --tags tag android-8.1.0_r1 +refs/tags/*:refs/tags/*`。对 `prebuilts/tools` 这种「每个 tag 都是一个数 GB 快照」的仓库，等于要下几十个 tag 的快照，累计 36GB+ 还远未结束
+   - 雪上加霜：TUNA 镜像对大仓库有排队限流（`remote: Waiting in queue... (Position: 74~81)`），且排队期间 0 字节流动，若设了 `GIT_HTTP_LOW_SPEED_TIME` 会把还在排队的会话误杀；被 SIGKILL 的 fetch 每次留下一个 `tmp_pack_*`，我们清理了 9 个残包共 37GB 垃圾
+   - 修复方案（绕过）：
+     1. 清理 `objects/pack/tmp_pack_*`
+     2. 手动单 tag 精准抓取：`cd .repo/projects/prebuilts/tools.git && git fetch --depth=1 aosp 'refs/tags/android-8.1.0_r1:refs/tags/android-8.1.0_r1'`（只下 4~5GB 一个快照，且不设低速断开，耐心排队）
+     3. 之后 `repo sync` 检查到 HEAD 已在目标 revision 会跳过该项目
+   - 教训：浅克隆 tag 版 AOSP 遇到巨型 prebuilts 仓库时，手动单 ref 抓取是正解；镜像排队期不要设激进的低速断开
+4. **TUNA 镜像早高峰节流（2026-11-17 实测）**
+   - 02:00~08:00：单连接 0.5~6MB/s；09:00 后大仓库排队 Position 74+，单连接几十 KB/s
+   - 应对：大文件抓取尽量安排在中国时区深夜；repo sync 用 `-j8` 平衡排队与吞吐
 
 ## 七、模拟器运行
 
