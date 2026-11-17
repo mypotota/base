@@ -106,6 +106,10 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
    - 根因：Ubuntu 26.04 无 python2，`python` 符号链接指向 python 3.14；8.1 的构建脚本（merge-event-log-tags.py 等）全是 py2 语法
    - 修复：用源码树内置的 `prebuilts/python/linux-x86/2.7.5` 做 shim——写 `~/aosp-scripts/shims/{python,python2,python2.7}` 三个小脚本（内设 `PYTHONHOME` 后 exec 内置 python），并 `export PATH=~/aosp-scripts/shims:$PATH`
    - 细节：内置 python2.7.5 跑脚本必须设 `PYTHONHOME` 指向其 prefix，否则 import 全挂；实测其不含 zlib/ssl 模块，但排查后确认 8.1 构建脚本均不 import zlib/ssl，可放心使用（若后续有需要再源码编 python2.7.18）
+7. **错误③：预编译 flex-2.5.39 在新 glibc 下崩溃（2026-11-17 12:32）**
+   - 报错：编 `libedify`（bootable/recovery）时 `flex-2.5.39: loadlocale.c:130: _nl_intern_locale_data: Assertion 'cnt < (sizeof (_nl_value_type_LC_TIME)…' failed, Aborted (core dumped)`
+   - 根因：glibc 2.26 改了 locale 内部数据结构（`_nl_value_type_LC_TIME` 数组变长），旧二进制编译期写入的数组长度检查对新 locale 数据断言失败。所有 glibc≤2.25 时代的 prebuilt 都可能中招
+   - 修复：构建环境 `export LC_ALL=C`（C locale 不加载 locale 表，绕开断言）；备选方案是把 prebuilts/misc/linux-x86/flex/flex-2.5.39 换成包装脚本 exec 系统 flex 2.6
 
 ## 七、模拟器运行
 
