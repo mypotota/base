@@ -110,6 +110,23 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
    - 报错：编 `libedify`（bootable/recovery）时 `flex-2.5.39: loadlocale.c:130: _nl_intern_locale_data: Assertion 'cnt < (sizeof (_nl_value_type_LC_TIME)…' failed, Aborted (core dumped)`
    - 根因：glibc 2.26 改了 locale 内部数据结构（`_nl_value_type_LC_TIME` 数组变长），旧二进制编译期写入的数组长度检查对新 locale 数据断言失败。所有 glibc≤2.25 时代的 prebuilt 都可能中招
    - 修复：构建环境 `export LC_ALL=C`（C locale 不加载 locale 表，绕开断言）；备选方案是把 prebuilts/misc/linux-x86/flex/flex-2.5.39 换成包装脚本 exec 系统 flex 2.6
+8. **错误④：sepolicy_tests 用 ctypes 加载 64 位 so 失败（2026-11-17 13:29，编译 52 分钟后）**
+   - 报错：`libsepolwrap.so: wrong ELF class: ELFCLASS64`（OSError from ctypes.CDLL）
+   - 根因：`prebuilts/python/linux-x86/2.7.5` 名字里的 `linux-x86` 是 **32 位**（AOSP 命名传统），sepolicy_tests.py（build/make/target/board/Android.mk 的 sepolicy 一致性测试）需要 dlopen 64 位 `libsepolwrap.so`，32 位 python 无法加载
+   - 修复：树里 `prebuilts/gdb/linux-x86/bin/python2.7` 是 64 位 python2.7.5（自带 zlib/hashlib/ctypes，实测 dlopen OK），shim 改指向它（`PYTHONHOME=prebuilts/gdb/linux-x86`）
+   - 经验：AOSP prebuilts 目录名 `linux-x86` ≠ 64 位；需要 64 位宿主工具时先 `file` 确认
+9. **错误⑤：gdb 版 python 的 hashlib 是空壳（2026-11-17 13:36）**
+   - 报错：打包 cache.img 时 `build_image.py` → `ERROR:root:code for hash md5 was not found` / `ValueError: unsupported hash type md5`
+   - 根因：`prebuilts/gdb/linux-x86/bin/python2.7`（64 位）虽能 `import hashlib`，但编译时裁掉了内置 md5/sha 模块，真正计算哈希时才炸——之前只验证了 import 是不够的
+   - 修复：源码自建 python2.7.18 → `~/.local/py27`：
+     - zlib 用树内 `external/zlib/src`（TUNA 无 zlib 镜像），`./configure --prefix=~/.local/pyzlib` 后供 python 链接
+     - Python-2.7.18.tgz 从 TUNA `mirrors.tuna.tsinghua.edu.cn/python/2.7.18/` 下载
+     - **gcc 15 默认 `-std=c23`，撞上 python2 的 `typedef enum {false,true} bool`**（`cannot use keyword 'false' as enumeration constant`）→ configure 时加 `CFLAGS="-O2 -std=gnu89"` 解决
+     - 校验必须做真实运算：`hashlib.md5(b'x').hexdigest()` == `9dd4e461268c8034f5c8564e155c67a6`
+10. **错误⑥：dex2oatd 缺 ANDROID_DATA（2026-11-17 13:57）**
+   - 报错：生成 odex 时 `dex2oatd F ... utils.cc:762] ANDROID_DATA not set and /data does not exist` → Runtime aborting
+   - 根因：ART 宿主工具启动时要求 `ANDROID_DATA` 环境变量或宿主机存在 `/data` 目录；Google 内部构建机有 `/data`，普通 Linux 桌面机没有
+   - 修复：`mkdir -p ~/aosp-scripts/and-data/data/dalvik-cache && export ANDROID_DATA=~/aosp-scripts/and-data`
 
 ## 七、模拟器运行
 
