@@ -127,6 +127,10 @@ manifest 已确认包含（免去在 26.04 上自装旧环境的麻烦）：
    - 报错：生成 odex 时 `dex2oatd F ... utils.cc:762] ANDROID_DATA not set and /data does not exist` → Runtime aborting
    - 根因：ART 宿主工具启动时要求 `ANDROID_DATA` 环境变量或宿主机存在 `/data` 目录；Google 内部构建机有 `/data`，普通 Linux 桌面机没有
    - 修复：`mkdir -p ~/aosp-scripts/and-data/data/dalvik-cache && export ANDROID_DATA=~/aosp-scripts/and-data`
+11. **错误⑦：host dex2oat 无法按固定基址映射 boot.art（2026-11-17 14:00）**
+   - 报错：`image_space.cc Could not create image space ... Failed to mmap at expected address, mapped at 0x7xxx... instead of 0x703e5000` → `Dex file fallback disabled, cannot continue without image` → 所有 odex 任务失败
+   - 根因：8.1 的 boot.art 内嵌固定基址约 0x703e5000（老地址布局），新内核/glibc 的 mmap 布局下该区域被占用，MAP_FIXED 失败；dex2oat 不接受 imageless 回退。AOSP 8.x 在新宿主上的著名问题
+   - 修复（尝试顺序）：①`setarch -R make -j10`（仅构建进程关 ASLR，恢复老式地址布局）；②若无效则 `export NO_DEXPREOPT=true` 完全跳过 host 端 dex 预优化（eng 版本可接受，首次开机稍慢）
 
 ## 七、模拟器运行
 
