@@ -179,3 +179,18 @@ PATH=$PWD/prebuilts/android-emulator/linux_x86_64:$PATH \
 - 源码同步：02:19 → 12:17（约 10 小时，含镜像限流、排队、tag 爆炸绕坑；正常深夜时段约 2~3 小时）
 - 编译：12:20 → 14:35（有效编译约 100 分钟，其中 5 次错误返工约 40 分钟）
 - 模拟器开机验证：14:40 → 14:41 ✅
+
+## 十、移除 git/repo 管理（2026-11-17 22:27）
+
+应要求把 `~/aosp` 转成纯源码目录：
+
+- 删除 `.repo/`（68GB：manifests、project-objects、projects、hooks 等）
+- 删除全树 594 个项目级 `.git` 链接文件
+- 磁盘可用：115G → **182G**
+
+影响与验证：
+
+- ✅ `source build/envsetup.sh` + `lunch aosp_x86_64-eng` 正常（构建系统不依赖 .repo）
+- ✅ 模拟器继续正常运行（out/ 与 prebuilts/ 工作区文件不受影响）
+- ⚠️ 代价：不能再 `repo sync` 更新源码、无法用 git 查看各项目历史/切换版本；日后若要升级版本或恢复 git 管理，需重新 `repo init + sync`（建议按本记录第三节的网络经验安排在深夜）
+- `~/aosp/env_aosp8.sh` 及全部脚本不受影响
