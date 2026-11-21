@@ -32,5 +32,4 @@ Android 10 的 ATMS 分家）需注意差异。新改动记录从本目录开始
 
 ## SkyDroid 实机专题
 
-- [Android 8.1 移植记录](skydroid-android-8.1-port.md)
-- [历史故障与实机反馈](skydroid-android-8.1-issues.md)
+- [HSkydroid-H16 设备专题](../HSkydroid-H16/README.md)

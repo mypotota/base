@@ -38,7 +38,15 @@
 
 ## 新反馈登记
 
-本轮尚未收到新故障描述。后续每个问题单独记录 **现象、复现步骤、预期结果、实际结果、发生时的设备状态、对应日志、处理结果与复测范围**。偶发黑屏时尤其要区分实物面板是否熄灭、ADB 截图是否同时黑屏，以及黑屏前有没有锁屏、旋钮操作或拔掉 USB。
+后续每个问题单独记录 **现象、复现步骤、预期结果、实际结果、发生时的设备状态、对应日志、处理结果与复测范围**。偶发黑屏时尤其要区分实物面板是否熄灭、ADB 截图是否同时黑屏，以及黑屏前有没有锁屏、旋钮操作或拔掉 USB。
+
+### 熄屏后背光仍亮
+
+[查看分步修复计划](backlight-sleep-fix-plan.md)。
+
+ADB 发送 `KEYCODE_SLEEP` 后，`dumpsys power` 显示 `Display Power: state=OFF`，HWC 也报告显示已关闭。与此同时，`/sys/class/backlight/lcd-backlight/actual_brightness` 在唤醒、熄屏和再次唤醒时均为 `500`。
+
+Oreo 的 LightsService 查找 `android.hardware.light@2.0::ILight`。系统中有原厂 `lights.song.so`，该模块包含访问 LCD 背光 sysfs 的代码，但当前镜像没有对应的 HIDL 服务，`lshal` 中也没有 ILight。优先验证 AOSP light 2.0 适配器能否加载原厂模块，并检查服务运行账户的 sysfs 写权限。修复后的验收条件是熄屏时实际亮度归零、唤醒后恢复亮度，以及设置中的亮度滑块能够调节背光。
 
 ```bash
 adb shell getprop sys.boot_completed

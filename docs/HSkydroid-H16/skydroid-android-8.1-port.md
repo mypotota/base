@@ -37,12 +37,25 @@ e2fsck -fn "$img"
 先用 `fastboot boot` 临时启动原厂有效载荷验证命令，再配对测试实验 boot 和 8.1 system。以下命令适用于这台已确认的目标设备。请从放有相应镜像和 `SHA256SUMS` 的目录执行，并把 `FASTBOOT_SERIAL` 替换为本机 `fastboot devices` 的输出。
 
 ```bash
+# 校验当前目录下的镜像文件。任一文件校验失败时，停止刷写。
 sha256sum -c SHA256SUMS
+
+# 查询指定设备的产品代号，确认返回 arowana-rc 后再继续。
 fastboot -s "$FASTBOOT_SERIAL" getvar product
+
+# 将 system.img 拆成不超过 48 MiB 的稀疏传输段，写入设备的 system 分区。
 fastboot -s "$FASTBOOT_SERIAL" -S 48M flash system system.img
+
+# 从内存临时启动 boot.img，设备的 boot 分区不会被写入。
 fastboot -s "$FASTBOOT_SERIAL" boot boot.img
+
+# 等待设备重新建立 ADB 连接。
 adb wait-for-device
+
+# 读取 Android 版本。此移植版预期返回 8.1.0。
 adb shell getprop ro.build.version.release
+
+# 检查系统启动是否完成。返回 1 表示完成，空值表示尚未完成。
 adb shell getprop sys.boot_completed
 ```
 
