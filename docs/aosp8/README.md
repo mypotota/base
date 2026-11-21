@@ -29,3 +29,8 @@ Android 10 的 ATMS 分家）需注意差异。新改动记录从本目录开始
    `source build/envsetup.sh && lunch` 会因缺 python2 shim / Jack 变量在编译期必挂。
 2. **整编/增量编译都是 `make`（或 `m`）**，目标名不跟源码目录名（`make packages` ❌）。
 3. **模拟器带窗口启动**，headless（`-no-window`）会卡死在开机（guest 熵池问题，见 ch00）。
+
+## SkyDroid 实机专题
+
+- [Android 8.1 移植记录](skydroid-android-8.1-port.md)
+- [历史故障与实机反馈](skydroid-android-8.1-issues.md)

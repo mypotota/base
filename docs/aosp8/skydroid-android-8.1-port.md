@@ -1,0 +1,53 @@
+# SkyDroid 实机 Android 8.1 移植记录
+
+本次目标是在 SkyDroid `song`（设备代号 `arowana-rc`，板级平台 `abies`）上建立可启动的 AOSP 8.1 ARM64 开发基线。原厂系统为 Android 7.1.2，构建号 `GCSAA221229`。移植版已通过 Fastboot 安装并验证普通重启，研发阶段仍需逐项验证外设和遥控功能。实际故障与修复见[问题记录](skydroid-android-8.1-issues.md)。
+
+## 1. 先验证退路
+
+在原厂系统上用 ADB root 读取分区，保存大小、映射和校验值。先备份了 17 个原始分区镜像，再补读完整 eMMC 用户区、主备 GPT 和两个 eMMC 硬件启动区。整盘镜像从运行中的 Android 读取，`userdata` 等可写分区没有离线快照的一致性保证。RPMB 未备份。
+
+设备进入 Fastboot 后，`getvar product` 返回 `arowana-rc`，`max-download-size` 为 `0x3800000`（56 MiB）。这台 Bootloader 不支持 Fastboot `fetch`。先实测回刷原厂 `logo`，再用 `-S 48M` 回刷 128 MiB 的 `recovery`，两次均读回核对。还用损坏启动头的 Recovery 镜像演练了写入和原厂回刷，读回确认恢复成功。演练期间保留了正常 Android 的启动路径。
+
+原厂回退时按改动范围选择分区。实验只改过 `system` 时，已实测单独回刷原厂 `system` 能恢复 Android 7.1.2。当前 8.1 同时改了 `boot` 和 `system`，回退时应同时恢复原厂的这一对镜像。正常 Fastboot 分区刷写与整盘 eMMC 恢复是两种操作。
+
+## 2. 建立独立构建目标
+
+`~/aosp` 已有的模拟器目标是 x86-64，原镜像大小为 2.50 GiB。实机使用 ARM64 和 32 位 ARM 兼容层，`system` 分区为 **1,395,654,656 字节**。原厂 `/vendor` 链接到 `/system/vendor`，因此设备目标保留同样的挂载布局。
+
+在 `~/aosp/device/skydroid/arowana_rc/` 建立 `skydroid_arowana_rc-userdebug`。`BoardConfig.mk` 设置 ARM64/ARM、ext4、`system/vendor` 及分区大小。`proprietary.mk` 从原厂镜像导入显示、音频、固件和部分遥控组件。`legacy-init.mk` 提供旧 `init` 能加载的服务配置；图形、音频、Keymaster、Gatekeeper 和蓝牙的 Oreo 适配器在产品配置里显式声明。
+
+```bash
+source ~/aosp/env_aosp8.sh skydroid_arowana_rc-userdebug
+BUILD_NUMBER=ar01 setarch "$(uname -m)" -R make -j8 systemimage WITH_DEXPREOPT=false
+
+img=out/target/product/arowana_rc/system.img
+stat -c '%s %n' "$img"
+file "$img" out/target/product/arowana_rc/system/bin/app_process64
+e2fsck -fn "$img"
+```
+
+第一次编译在生成 `build.prop` 时失败。构建指纹有 94 字节，超过 Oreo 的 91 字节上限。将构建编号缩短为 `ar01` 后增量重编通过。验收时确认 `app_process64` 是 AArch64，`system.img` 为 ext4 且大小等于分区容量。
+
+## 3. 从只刷 system 到配套启动
+
+第一次只刷 `system.img`。Fastboot 分段全部返回 `OKAY`，ADB 能读到 8.1.0，但 `sys.boot_completed` 为空。启动日志显示原厂 7.1.2 的 `init` 无法解析 Oreo 的部分服务语法，同时还缺少 SELinux 服务上下文。一次直接换用 Oreo `init` 的临时启动没有建立稳定的 ADB。随后改为保留原厂内核、设备树和 `init`，针对性移植 Oreo 的 classpath、包管理默认属性、SELinux 策略与上下文，并修订 system 中的服务配置。
+
+本机设备工作目录位于 `~/workspace/` 下以 `skydroid-song-GCSAA221229-` 开头的目录。运行其中 `oreo-port/build_boot.py --hybrid-policy` 可从原厂 `boot.img` 和当前 AOSP 输出构建实验启动镜像。脚本校验原厂启动镜像头内的 SHA-256，再按相同的组件布局重打包。
+
+先用 `fastboot boot` 临时启动原厂有效载荷验证命令，再配对测试实验 boot 和 8.1 system。以下命令适用于这台已确认的目标设备。请从放有相应镜像和 `SHA256SUMS` 的目录执行，并把 `FASTBOOT_SERIAL` 替换为本机 `fastboot devices` 的输出。
+
+```bash
+sha256sum -c SHA256SUMS
+fastboot -s "$FASTBOOT_SERIAL" getvar product
+fastboot -s "$FASTBOOT_SERIAL" -S 48M flash system system.img
+fastboot -s "$FASTBOOT_SERIAL" boot boot.img
+adb wait-for-device
+adb shell getprop ro.build.version.release
+adb shell getprop sys.boot_completed
+```
+
+临时启动、核心服务检查和 Launcher3 前台验证通过后，才正式刷入实验 `boot`。普通重启再次返回 Android 8.1.0 和 `sys.boot_completed=1`，并读回核对了启动镜像实际写入的字节。后续显示修订已经纳入本机 `oreo-port/images/` 的 `system.img`，该目录包含配套 `boot.img` 和 SHA-256 清单。
+
+## 4. 定制开发从输入链路开始
+
+第一个练习可以在设备上运行 `adb shell su 0 getevent -lt`，逐个记录实体按键的 Linux 键码，再用设备专用的 `.kl` 文件练习 Android 映射。旋钮是否上报 `EV_ABS` 或 `EV_REL` 需要逐个验证；没有 evdev 事件的控件再追踪厂商服务或 MCU 通道。输入路径确定后，适合做一个只读 Binder/AIDL Service 暴露旋钮事件，先用模拟数据验证 API，再接硬件。遥控输出联调应在接收端断开的台架上进行。
