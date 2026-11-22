@@ -60,7 +60,7 @@ debugfs -R 'stat /vendor/etc/wifi/wpa_supplicant.conf' "$OUT/system.img"
 debugfs -R 'stat /bin/wifi_init' "$OUT/system.img"
 ```
 
-本次 Wi-Fi 和蓝牙共用同一版 `system.img`，配对保留现有 8.1 `boot`。刷写与回退沿用[实机移植记录](安卓8.1移植记录.md)中的方法。回退时优先选用设备工作目录下的 `radio-fix/before/system.img` 及其校验清单，那里保存了本次修改前构建出的版本。回退这次无线改动只需刷该版 `system`。
+本次 Wi-Fi 和蓝牙共用同一版 `system.img`，配对保留现有 8.1 `boot`。刷写与回退沿用[实机移植记录](../移植与故障/安卓8.1移植记录.md)中的方法。回退时优先选用设备工作目录下的 `radio-fix/before/system.img` 及其校验清单，那里保存了本次修改前构建出的版本。回退这次无线改动只需刷该版 `system`。
 
 ## 4. 实机验收
 
