@@ -51,7 +51,7 @@ source "$HOME/aosp/env_aosp8.sh" skydroid_arowana_rc-userdebug
 BUILD_NUMBER=ar01 setarch "$(uname -m)" -R make -j8 systemimage WITH_DEXPREOPT=false
 ```
 
-与 Wi-Fi 修复使用同一版 `system.img`。刷写与回退见 [Wi-Fi 修复指南](wifi-repair-guide.md#3-编译并验证实际镜像)及[实机移植记录](skydroid-android-8.1-port.md)。保留先前的 8.1 boot 和原厂备份。
+与 Wi-Fi 修复使用同一版 `system.img`。刷写与回退见 [Wi-Fi 修复指南](Wi-Fi修复与连接验证.md#3-编译并验证实际镜像)及[实机移植记录](安卓8.1移植记录.md)。保留先前的 8.1 boot 和原厂备份。
 
 ## 3. 启用和复测
 
