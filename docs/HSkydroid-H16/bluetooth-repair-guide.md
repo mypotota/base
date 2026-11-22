@@ -99,4 +99,11 @@ BUILD_NUMBER=ar01 setarch "$(uname -m)" -R make -j8 systemimage WITH_DEXPREOPT=f
 
 追加对照中，先关闭 Wi-Fi 并确认 `wpa_supplicant=stopped`，再单独开启蓝牙。结果仍从 `BLE_TURNING_ON` 回落到 `OFF`，UART 接收计数为 0。测试后重新启用 Wi-Fi，确认连接状态回到 `COMPLETED`。这个结果排除了此次故障必须由 Wi-Fi 正在运行才能触发。
 
-日志中的 `Firmware configured in …` 由计时对象析构时打印，失败清理也会触发。应以固件成功回调、UART RX 和蓝牙状态为准。现有证据能定位到控制器通信，尚无法区分板级电源和唤醒时序、UART 针脚或控制器本身。下一步是在可恢复的测试环境对照原厂系统开启蓝牙时的供电、唤醒和串口收发，确认原厂是否能收到 HCI Reset 回包。
+日志中的 `Firmware configured in …` 由计时对象析构时打印，失败清理也会触发。应以固件成功回调、UART RX 和蓝牙状态为准。现有证据能定位到控制器通信，尚无法区分板级电源和唤醒时序、UART 针脚或控制器本身。后续在原厂 7.1.2 上完成了对照，结果见下文。
+
+
+## 5. 原厂系统对照
+
+用原厂 Android 7.1.2 的 `system.img` 和从内存启动的原厂诊断 ramdisk 做对照。实机检查确认 `/data` 和 `/cache` 都挂载在 tmpfs，`/persist` 以只读方式挂载。原厂系统报告 `sys.boot_completed=1`。Wi-Fi 关闭时发起蓝牙开启，UART 发送计数从 0 增加到 12，接收计数始终为 0。原厂蓝牙栈也报等待 HCI Reset（opcode `0x0c03`）超时并重启蓝牙进程。
+
+因此这个故障可在原厂系统和 Oreo 移植版中复现。两套系统都能打开同一个 UART，但都没有收到控制器回复。进一步定位需要在开启蓝牙的瞬间测量控制器供电和复位、唤醒信号，并检查 UART TX、RX 与 CTS/RTS。当前测试只能确认串口驱动的发送计数和接收计数，无法确认数据实际到达控制器引脚，也无法确定具体坏在哪个元件。
