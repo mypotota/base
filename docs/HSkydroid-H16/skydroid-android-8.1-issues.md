@@ -60,4 +60,4 @@ adb logcat -b crash -d
 
 ### 设置铃声无声
 
-实机可听到直接生成的 PCM 测试音，RT5665 播放通道同时处于 `RUNNING`。试听 Ogg 铃声时，播放器打不开 Vorbis 解码器。已核实 OMX 服务和软件解码库存在，镜像缺少媒体编解码配置。复现、配置与回退见[设置铃声无声修复指南](audio-vorbis-fix-guide.md)。
+实机可听到直接生成的 PCM 测试音。最初缺少媒体编解码 XML，试听 Ogg 时无法创建 Vorbis 解码器。补上 XML 后，解码器已能创建，但播放仍停在 0 ms。实机对照确认原厂 init 没有启动 `class hal` 中的 `hidl_memory`，播放无法取得 `IAllocator/ashmem`。临时启动服务后，同一个铃声的播放进度和 PCM 指针都正常推进，功放打开。测试结束后恢复了服务未运行的状态。永久配置和回退见[设置铃声无声修复指南](audio-vorbis-fix-guide.md)。

@@ -1,6 +1,6 @@
-# 修复设置铃声无声与 Vorbis 解码失败
+# 修复设置铃声无声与 Vorbis 播放卡在 0 ms
 
-这台 SkyDroid 的 PCM 测试音能从实体扬声器听到，RT5665 的播放通道同时处于 `RUNNING`。但设置里的 Ogg 铃声在创建 `audio/vorbis` 解码器时失败，播放器在产生 PCM 之前就退出了。本机已确认 OMX 服务注册、32 位 Vorbis 软件解码库存在，当前镜像缺少 `media_codecs*.xml`。第一轮修复补装解码器配置，保留现有声卡驱动和音频路由。
+这台 SkyDroid 的 PCM 测试音能从实体扬声器听到，RT5665 的播放通道同时处于 `RUNNING`。Ogg 铃声无声先后有两个原因。最初缺少 `media_codecs*.xml`，导致创建 Vorbis 解码器失败。用户补装 XML 后，设备已能创建 `OMX.google.vorbis.decoder`，但播放进度仍停在 0 ms。第二轮实测确认，原厂 `init` 没有启动 Oreo 的 `hidl_memory` 服务，`ACodec` 无法取得分配编解码缓冲区所需的 `IAllocator/ashmem`。
 
 ## 1. 复现并定位故障
 
@@ -23,7 +23,7 @@ ADB_SERIAL='e2d72141'
 # 查看 OMX 是否注册。本机故障版本已经能看到 IOmx/default。
 "$ADB" -s "$ADB_SERIAL" shell 'lshal | grep -F "IOmx/default"'
 
-# 检查 Oreo 的配置搜索目录。故障版本未找到媒体编解码 XML。
+# 检查 Oreo 的配置搜索目录。已合入第一阶段修复的设备应在 vendor 中找到两份 XML。
 "$ADB" -s "$ADB_SERIAL" shell \
   'ls /odm/etc/media_codecs*.xml /vendor/etc/media_codecs*.xml /system/etc/media_codecs*.xml 2>/dev/null'
 
@@ -32,6 +32,8 @@ ADB_SERIAL='e2d72141'
 ```
 
 OMX 已注册时，单条 `Cannot open /vendor/manifest.xml` 警告不足以认定服务没有起来。应先检查解码器能否被发现和创建。
+
+如果日志已经有 `makeComponentInstance(OMX.google.vorbis.decoder)`，但播放器一直停在 0 ms，跳到第 2.2 节检查 `IAllocator/ashmem`。测试中出现的 `ConfigPriority` 和 `ConfigAndroidVendorExtension` 警告与这种卡住现象不能画等号，临时启动共享内存服务后，播放进度实际恢复。
 
 ### media_codecs*.xml 是什么
 
@@ -43,7 +45,9 @@ OMX 已注册时，单条 `Cannot open /vendor/manifest.xml` 警告不足以认�
 
 这些文件配置的是媒体格式与编解码组件。扬声器、听筒和音量属于音频策略的排查范围。
 
-## 2. 把音频配置装进 system.img
+## 2. 修正编解码配置和服务启动
+
+### 2.1 把音频配置装进 system.img
 
 在 `~/aosp/device/skydroid/arowana_rc/` 新建 `media_codecs.xml`。Oreo 优先搜索 `/odm/etc` 和 `/vendor/etc`。该设备的 `/vendor` 指向 `/system/vendor`，因此把入口和被引用的文件放在同一 vendor 配置目录。
 
@@ -62,6 +66,63 @@ OMX 已注册时，单条 `Cannot open /vendor/manifest.xml` 警告不足以认�
 PRODUCT_COPY_FILES += \
     device/skydroid/arowana_rc/media_codecs.xml:system/vendor/etc/media_codecs.xml \
     frameworks/av/media/libstagefright/data/media_codecs_google_audio.xml:system/vendor/etc/media_codecs_google_audio.xml
+```
+
+### 2.2 让 hidl_memory 随系统启动
+
+Oreo 的 `ACodec` 在分配编解码缓冲区时查找 `IAllocator/ashmem`。当前的 `/system/etc/init/android.hidl.allocator@1.0-service.rc` 将 `hidl_memory` 放在 `class hal`，而这台设备沿用的原厂 `init.rc` 没有 `class_start hal`。所以服务程序虽然装在镜像里，开机时没有启动。
+
+#### 先做可逆的实机验证
+
+以下命令适用于确认开机后没有 `IAllocator/ashmem` 的移植版。若服务本来就在运行，保留现场，直接排查其它环节。
+
+```bash
+# 读取服务状态和 HIDL 注册情况，记录临时测试前的基线。
+"$ADB" -s "$ADB_SERIAL" shell getprop init.svc.hidl_memory
+"$ADB" -s "$ADB_SERIAL" shell 'lshal | grep -F "IAllocator/ashmem"'
+
+# 临时通知 init 启动已有服务。su 0 以 root 发送控制属性，操作不写入 system.img。
+"$ADB" -s "$ADB_SERIAL" shell su 0 setprop ctl.start hidl_memory
+
+# 确认 init 报告 running，且 hwservicemanager 已注册 IAllocator/ashmem。
+"$ADB" -s "$ADB_SERIAL" shell getprop init.svc.hidl_memory
+"$ADB" -s "$ADB_SERIAL" shell 'lshal | grep -F "IAllocator/ashmem"'
+
+# 此时去设置试听同一个铃声。播放期间读取 ALSA 状态，观察 RUNNING 和 hw_ptr。
+"$ADB" -s "$ADB_SERIAL" shell 'cat /proc/asound/card0/pcm0p/sub0/status'
+
+# 播放停止后，关闭这次临时启动的服务，恢复测试前的未运行状态。
+"$ADB" -s "$ADB_SERIAL" shell su 0 setprop ctl.stop hidl_memory
+
+# 确认服务回到 stopped，注册表中也不再有 IAllocator/ashmem。
+"$ADB" -s "$ADB_SERIAL" shell getprop init.svc.hidl_memory
+"$ADB" -s "$ADB_SERIAL" shell 'lshal | grep -F "IAllocator/ashmem"'
+```
+
+用同一个 `Ring_Synth_04.ogg` 做对照时，启动服务前，媒体流与铃声流均停在 0 ms，PCM 关闭。启动服务后，两种流的进度都推进到约 2690 ms，PCM 处于 `RUNNING` 且硬件指针持续增加，内核显示外置功放 `AW8738 PA` 为 `On`。实验结束后服务已停，临时应用已卸载。永久修复仍需手动构建、刷写并确认实际听感。
+
+#### 在设备目标中永久启用
+
+```bash
+# 进入源代码根目录，以下源文件和设备文件路径都以这里为起点。
+cd "$HOME/aosp"
+
+# 保存 service rc 文件名，供复制规则复用。
+ALLOCATOR_RC='android.hidl.allocator@1.0-service.rc'
+
+# 复制 AOSP 原版 rc 到设备配置目录，只把 class hal 改成 class core。
+# 原厂 init 会启动 core。保留原版服务名、程序路径、用户和组。
+sed 's/^[[:space:]]*class hal[[:space:]]*$/    class core/' \
+    "system/libhidl/transport/allocator/1.0/default/$ALLOCATOR_RC" \
+    > "device/skydroid/arowana_rc/legacy-init/$ALLOCATOR_RC"
+```
+
+在 `device/skydroid/arowana_rc/legacy-init.mk` 加入以下复制规则。这个服务从 `/system/etc/init/` 加载，安装路径与显示用的图形 allocator 不同。
+
+```makefile
+# 用设备专用配置覆盖系统镜像里原有的 hidl_memory 启动配置。
+PRODUCT_COPY_FILES += \
+    device/skydroid/arowana_rc/legacy-init/android.hidl.allocator@1.0-service.rc:system/etc/init/android.hidl.allocator@1.0-service.rc
 ```
 
 ## 3. 构建并检查最终镜像
@@ -92,6 +153,12 @@ debugfs -R 'cat /vendor/etc/media_codecs_google_audio.xml' "$PRODUCT_OUT/system.
 # 确认待刷镜像内仍有软件解码库。预期输出 inode 信息。
 debugfs -R 'stat /lib/libstagefright_soft_vorbisdec.so' "$PRODUCT_OUT/system.img"
 
+# 检查实际打包的 hidl_memory 配置，应该显示 class core。
+debugfs -R 'cat /etc/init/android.hidl.allocator@1.0-service.rc' "$PRODUCT_OUT/system.img"
+
+# 确认镜像中仍有对应的共享内存服务程序。预期输出 inode 信息。
+debugfs -R 'stat /bin/hw/android.hidl.allocator@1.0-service' "$PRODUCT_OUT/system.img"
+
 # 计算候选镜像的 SHA-256，记录所测试的版本。
 sha256sum "$PRODUCT_OUT/system.img"
 ```
@@ -121,6 +188,10 @@ timeout 90 "$ADB" -s "$ADB_SERIAL" wait-for-device
 # 确认 Android 启动完成。返回 1 后再试听。
 "$ADB" -s "$ADB_SERIAL" shell getprop sys.boot_completed
 
+# 确认 hidl_memory 正常随开机启动，无需再手动发送 ctl.start。
+"$ADB" -s "$ADB_SERIAL" shell getprop init.svc.hidl_memory
+"$ADB" -s "$ADB_SERIAL" shell 'lshal | grep -F "IAllocator/ashmem"'
+
 # 重新监听解码日志，同时在设置里试听同一个 Ogg 铃声。
 "$ADB" -s "$ADB_SERIAL" logcat -v time ACodec:D NuPlayerDecoder:D MediaPlayer:E '*:S'
 
@@ -134,6 +205,7 @@ timeout 90 "$ADB" -s "$ADB_SERIAL" wait-for-device
 ## 5. 仍然无声时怎么查
 
 - **仍无法创建 Vorbis 解码器**。检查更高优先级的配置入口、XML 和 Include 路径，再查 OMX 进程是否因架构或依赖错误而打不开动态库。
+- **解码器已创建，播放停在 0 ms，PCM 关闭**。优先确认 `hidl_memory` 是 `running`，并确认注册的是 `IAllocator/ashmem`。
 - **解码器已创建，但播放途中报错**。换一个已知可用的 Ogg 文件，并观察解码错误是否能复现。
 - **PCM 已运行但扬声器仍安静**。查看铃声流 `STREAM_RING` 的静音、音量和播放时的输出设备。媒体流的测试不能代替铃声流路由检查。
 
