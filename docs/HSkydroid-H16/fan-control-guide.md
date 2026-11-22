@@ -1,0 +1,54 @@
+# H16 风扇实机验证与自动温控修复
+
+## 实机结果
+
+在 SkyDroid H16（`arowana-rc`，AOSP 8.1，ADB 序列号 `e2d72141`）上，GPIO174 已配置为输出，测试前读数为 `0`。将输出切到 `1` 后，实机观察确认风扇转动。测试保持高电平约 10 秒，随后读回 `0`。当前系统未发现可读的风扇 RPM 接口，本次通过现场观察确认转动。
+
+原厂 `/system/bin/fan` 的默认 GPIO 为 174，可通过 `ro.fan.gpio` 覆盖。分析原厂程序得到默认高温阈值 75 °C、低温阈值 60 °C，轮询周期 10 秒。具体取温逻辑和整套阈值行为仍需在自动服务修复后验证。
+
+## 短时手动测试
+
+以下脚本要求 GPIO 已由系统配置为输出且初始值为 0。脚本只切换该 GPIO 已存在的 value 节点。
+
+```bash
+# 使用同一套 Android SDK adb，避免与 AOSP 树内的旧版 adb 反复重启服务。
+ADB_BIN="$HOME/Android/Sdk/platform-tools/adb"
+# 选择本次测试的 H16。连接其他设备时先用 adb devices 确认序列号。
+ADB_SERIAL='e2d72141'
+
+# 在设备上以 root 执行下方脚本。带引号的 DEVICE 让变量由设备端展开。
+"$ADB_BIN" -s "$ADB_SERIAL" shell 'su 0 sh -s' <<'DEVICE'
+# 命令失败时退出，并让未定义变量触发错误。
+set -eu
+node=/sys/class/gpio/gpio174/value
+# 读取初始值。仅在输出方向已经是 out 且低电平时开始本次测试。
+original=$(cat "$node")
+[ "$(cat /sys/class/gpio/gpio174/direction)" = out ]
+[ "$original" = 0 ]
+# 注册退出回写。收到常见中断信号时退出，触发恢复。
+trap 'printf "%s\n" "$original" > "$node"' EXIT
+trap 'exit 1' HUP INT TERM
+# 拉高 GPIO，再读回输出。在这 10 秒内观察气流或听风扇声音。
+printf '1\n' > "$node"
+cat "$node"
+sleep 10
+# 恢复到低电平并读回确认，预期输出为 0。
+printf '%s\n' "$original" > "$node"
+cat "$node"
+DEVICE
+```
+
+## 自动温控修复
+
+当前内核启动日志有 `init: Service fan does not have a SELinux domain defined.`。设备上已有 `/system/bin/fan`，但查询不到运行中的服务进程。手动测试确认风扇和 GPIO 输出路径可用。
+
+```bash
+# 查询 init 启动日志。日志轮转后可能需要从下次正常启动重新采集。
+"$ADB_BIN" -s "$ADB_SERIAL" shell 'su 0 dmesg' | rg -i 'service fan'
+# 查看 init 服务状态、二进制的 SELinux 标签，以及当前是否存在风扇进程。
+"$ADB_BIN" -s "$ADB_SERIAL" shell 'getprop init.svc.fan; ls -Z /system/bin/fan; ps -A | grep -w fan'
+```
+
+1. 核对产品 init 配置中 `service fan` 的路径和启动条件，给该可执行文件设置独立的执行标签，并配置 init 到风扇服务域的转换。
+2. 根据设备实际路径、标签及 AVC 日志补足 GPIO 与温度节点所需的权限。保持 SELinux Enforcing。
+3. 构建后确认启动日志消失、`init.svc.fan` 显示 `running`。记录温度、GPIO 值和现场风扇状态，验证升温启动和降温停止两个方向，并核对原厂阈值及属性覆盖情况。

@@ -8,3 +8,5 @@ SkyDroid `song / arowana-rc` 的 AOSP 8.1 实机移植、故障记录与定制�
 - [设置铃声无声与 Vorbis 解码修复指南](audio-vorbis-fix-guide.md)
 - [Wi-Fi 修复与连接验证](wifi-repair-guide.md)
 - [蓝牙修复及 HCI 超时诊断](bluetooth-repair-guide.md)
+- [风扇实机验证与自动温控修复](fan-control-guide.md)
+- [AUX1 与 AUX2 旋钮接口](aux-knob-interface.md)
